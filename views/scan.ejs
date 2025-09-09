@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title><%= titulo %></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <!-- CSS global desde /public (ruta relativa para / y /BLUMER/) -->
+  <link rel="stylesheet" href="css/app.css">
+
+  <!-- Estilos mínimos para la alerta -->
+  <style>
+    .alert {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 14px; border-radius: 10px; font-weight: 600;
+      box-shadow: 0 6px 20px rgba(0,0,0,.18); z-index: 9999;
+      border: 1px solid transparent; text-align: center;
+    }
+    .alert--error { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .alert--ok    { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    @media (prefers-color-scheme: dark) {
+      .alert--error { background: #3f1f20; color: #fecaca; border-color: #7f1d1d; }
+      .alert--ok    { background: #16351f; color: #bbf7d0; border-color: #14532d; }
+    }
+  </style>
+
+  <!-- Fuerza HTTPS (excepto localhost) para cámara en móviles -->
+  <script>
+  (function () {
+    var isHttp = location.protocol !== 'https:';
+    var isLocal = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+    if (isHttp && !isLocal) {
+      var target = 'https://' + location.host + location.pathname + location.search + location.hash;
+      location.replace(target);
+    }
+  })();
+  </script>
+</head>
+<body>
+  <!-- Contenedor de alerta -->
+  <div id="alert" class="alert alert--error" hidden aria-live="polite" aria-atomic="true"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <header class="appbar card appbar--tight">
+      <div class="appbar__left">
+        
+        <div class="appbar__title" style="display:flex;align-items:center">
+          <picture class="brand-logo">
+           <!-- En oscuro usa el logo NEGRO -->
+            <source srcset="svg/logo%20black.svg" media="(prefers-color-scheme: dark)">
+          <!-- En claro (fallback) usa el logo BLANCO -->
+          <img src="svg/logo%20white.svg"
+         alt="Palacio del Blumer"
+         style="height:28px;width:auto;display:block;">
+          </picture>
+          </div>
+
+
+          <div class="appbar__subtitle muted">Consulta de precios</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ÚNICA PANTALLA -->
+    <section id="pane-scan" class="pane is-visible" role="region" aria-label="Escanear o ingresar código">
+      <div class="hero card">
+        <div class="hero__body">
+          <h2 class="hero__title">Apunta al código</h2>
+          <!-- Ilustración -->
+          <img class="scan-illustration" src="svg/barcode.jpeg" alt="Ilustración: escanea el código de barras">
+          <div class="controls">
+            <label class="visually-hidden" for="cameraSelect">Cámara</label>
+            <select id="cameraSelect" title="Cámara"></select>
+            <button id="btn-torch" disabled>Linterna</button>
+          </div>
+          <div class="hero__actions" style="gap:10px; flex-direction:column; align-items:flex-start;">
+            <button id="btn-start" class="btn-primary">Iniciar escaneo</button>
+            <!-- Input para ingresar manualmente -->
+            <div style="display:flex; gap:8px; width:100%; max-width:420px;">
+              <input id="manual-text" class="input-lg" placeholder="Escribe referencia o código y presiona Enter" inputmode="numeric" autocomplete="off" style="flex:1;" />
+              <button id="btn-manual" class="btn-primary" type="button" title="Buscar código escrito">Buscar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arranca oculto; se muestra al iniciar -->
+      <div id="reader" class="card reader" hidden aria-hidden="true"></div>
+    </section>
+  </div>
+
+  <!-- Librería del escáner -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <script>
+    // ========= Helpers de rutas =========
+    function appBaseHref(){
+      const parentDir = location.pathname.replace(/\/[^\/]*$/, '/');
+      return location.origin + parentDir;
+    }
+
+    // Autostart SOLO si viene de detalle con ?autostart=1 (y lo limpiamos en cuanto lo detectamos)
+    const params = new URLSearchParams(location.search);
+    const hasAutoStart = params.get('autostart') === '1';
+
+    // ========= Utilidades =========
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    let html5QrCode = null;
+    let scanning = false;
+    let torchOn = false;
+
+    function beepOk(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(880,c.currentTime); o.connect(g); g.connect(c.destination); g.gain.setValueAtTime(0.05,c.currentTime); o.start(); o.stop(c.currentTime+0.08);}catch(e){} }
+    function beepError(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(240,c.currentTime); o.connect(g); g.connect(c.destination); g.gain.setValueAtTime(0.06,c.currentTime); o.start(); o.stop(c.currentTime+0.12);}catch(e){} if (navigator.vibrate) navigator.vibrate(120); }
+
+    // === ALERTA ===
+    function showAlert(msg, kind = 'error', timeout = 2200){
+      const el = document.getElementById('alert');
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.remove('alert--error','alert--ok');
+      el.classList.add(kind === 'ok' ? 'alert--ok' : 'alert--error');
+      el.hidden = false;
+      el.setAttribute('aria-hidden','false');
+      clearTimeout(el.__timer);
+      el.__timer = setTimeout(hideAlert, timeout);
+    }
+    function hideAlert(){
+      const el = document.getElementById('alert');
+      if (!el) return;
+      el.hidden = true;
+      el.setAttribute('aria-hidden','true');
+    }
+
+    // === mostrar/ocultar el contenedor del lector ===
+    function showReader(){
+      const r = document.getElementById('reader');
+      if (r){ r.hidden = false; r.setAttribute('aria-hidden','false'); }
+    }
+    function hideReader(){
+      const r = document.getElementById('reader');
+      if (r){ r.hidden = true; r.setAttribute('aria-hidden','true'); }
+    }
+
+    // === colocar el lector en el lugar de la imagen (heredando su ancho) ===
+    function placeReaderInHero(){
+      const reader = document.getElementById('reader');
+      const img = document.querySelector('.scan-illustration');
+      if (!reader || !img) return;
+
+      // 1) Copiar ancho real de la imagen al reader (para que quede del mismo tamaño)
+      const cs = getComputedStyle(img);
+      reader.style.width    = cs.width;                           // p.ej. "380px"
+      reader.style.maxWidth = cs.maxWidth !== 'none' ? cs.maxWidth : cs.width;
+
+      // 2) Reemplazar la imagen por el reader (misma posición en el layout)
+      if (!reader.classList.contains('in-hero')) {
+        img.replaceWith(reader);
+        reader.classList.add('in-hero');
+      }
+
+      // 3) Mostrarlo
+      showReader();
+    }
+
+    // ========= Consultar backend =========
+    async function consultar(texto){
+      const t = (texto || '').trim();
+      const isNumeric = /^[0-9]+$/.test(t);
+      const url  = new URL('buscar.php', appBaseHref());
+      const params = new URLSearchParams({ one: '1' });
+      if (isNumeric) params.set('barcode', t); else params.set('referencia', t);
+      url.search = params.toString();
+
+      const resp = await fetch(url.href, { headers: { 'Accept': 'application/json' }});
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=> '');
+        throw new Error(`HTTP ${resp.status} ${resp.statusText}` + (txt ? ` — ${txt}` : ''));
+      }
+      return resp.json();
+    }
+
+    // ========= Redirigir a detalle =========
+    function gotoDetalle(row, fallbackTexto){
+      const baseHref = appBaseHref();
+      const ref = row && row.Referencia && String(row.Referencia).trim();
+      const bar = row && row.CodigoBarra && String(row.CodigoBarra).trim();
+      let target;
+      if (ref)      target = new URL('detalle.php?referencia=' + encodeURIComponent(ref), baseHref).href;
+      else if (bar) target = new URL('detalle.php?barcode=' + encodeURIComponent(bar), baseHref).href;
+      else          target = new URL('detalle.php?referencia=' + encodeURIComponent(fallbackTexto || ''), baseHref).href;
+      location.href = target;
+    }
+
+    // ========= Escaneo =========
+    async function onCode(text){
+      if (scanning) return;
+      scanning = true;
+      try {
+        const json = await consultar(text);
+        const rows = (json && json.ok && Array.isArray(json.data)) ? json.data : [];
+        if (!rows.length) {
+          showAlert('Codigo de barra no encontrado.', 'error');
+          beepError();
+          return;
+        }
+        beepOk();
+        gotoDetalle(rows[0], text);
+      } catch (e) {
+        showAlert('Error consultando el servidor', 'error');
+        beepError();
+      } finally {
+        await sleep(1200);
+        scanning = false;
+      }
+    }
+
+    // ========= Resolver cámara preferida =========
+    async function resolvePreferredCameraId(){
+      const select = document.getElementById('cameraSelect');
+      let id = select && select.value ? select.value : null;
+      if (id) return id;
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length){
+          const back = devices.find(d => /back|trás|rear|environment/i.test(d.label || ''));
+          id = (back ? back.id : devices[0].id);
+          if (select && !select.options.length){
+            select.innerHTML = devices.map(d => `<option value="${d.id}">${d.label || `Cámara ${d.id}`}</option>`).join('');
+            select.value = id;
+          }
+        }
+      } catch {}
+      return id;
+    }
+
+    async function startCamera(deviceId){
+      const fps = 15;
+      const qrbox = 280;
+      const formatsToSupport = [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.ITF
+      ];
+
+      // Mueve el lector al lugar de la imagen antes de iniciar y hereda su ancho
+      placeReaderInHero();
+
+      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+      else if (html5QrCode.isScanning) await html5QrCode.stop();
+
+      const constraints = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: { exact: "environment" } };
+
+      await html5QrCode.start(
+        constraints,
+        { fps, qrbox, formatsToSupport },
+        decodedText => onCode(decodedText),
+        _err => {}
+      );
+
+      // Torch si existe
+      const btnTorch = document.getElementById('btn-torch');
+      btnTorch.disabled = true;
+      const video = document.querySelector('#reader video');
+      if (video && video.srcObject) {
+        const track = video.srcObject.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.torch) {
+          btnTorch.disabled = false;
+          btnTorch.onclick = async () => {
+            try {
+              torchOn = !torchOn;
+              await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+              btnTorch.textContent = torchOn ? 'Linterna (ON)' : 'Linterna';
+            } catch(e){}
+          };
+        }
+      }
+    }
+
+    // ========= Lógica reutilizable para consulta manual =========
+    async function doManualLookup(rawText){
+      const texto = (rawText || '').trim();
+      if (!texto) return;
+
+      try {
+        const json = await consultar(texto);
+        const rows = (json && json.ok && Array.isArray(json.data)) ? json.data : [];
+        if (!rows.length) {
+          showAlert('No se encontró la referencia/código.', 'error');
+          return;
+        }
+        gotoDetalle(rows[0], texto);
+      } catch (err) {
+        showAlert('Error consultando el servidor', 'error');
+      }
+    }
+
+    // ========= Entrada manual (Enter + Botón) =========
+    function attachManualInput(){
+      const inp = document.getElementById('manual-text');
+      if (inp && !inp.__wiredEnter){
+        inp.__wiredEnter = true;
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') doManualLookup(inp.value);
+        });
+      }
+      const btn = document.getElementById('btn-manual');
+      if (btn && !btn.__wiredClick){
+        btn.__wiredClick = true;
+        btn.addEventListener('click', () => {
+          const inp2 = document.getElementById('manual-text');
+          doManualLookup(inp2 ? inp2.value : '');
+        });
+      }
+    }
+
+    // ========= Init =========
+    (async function init(){
+      // Poblamos cámaras (si se puede) pero NO iniciamos hasta que el usuario pulse "Iniciar"
+      try {
+        const select = document.getElementById('cameraSelect');
+        const devices = await Html5Qrcode.getCameras();
+        if (!devices || devices.length === 0) {
+          select.innerHTML = '<option>No hay cámaras</option>';
+        } else {
+          select.innerHTML = devices.map(d => {
+            const label = d.label || `Cámara ${d.id}`;
+            return `<option value="${d.id}">${label}</option>`;
+          }).join('');
+          const back = devices.find(d => /back|trás|rear|environment/i.test(d.label || ''));
+          select.value = back ? back.id : devices[0].id;
+        }
+      } catch (e) {
+        hideReader();
+        document.getElementById('reader').innerHTML =
+          '<p class="muted">No se pudo listar cámaras (en móviles requiere HTTPS).</p>';
+      }
+
+      // Botón iniciar (con protección de reintento)
+      const btnStart = document.getElementById('btn-start');
+      btnStart.addEventListener('click', async () => {
+        btnStart.disabled = true;
+        try {
+          const id = await resolvePreferredCameraId();
+          await startCamera(id);
+        } catch(e){
+          hideReader();
+          document.getElementById('reader').innerHTML =
+            '<p class="muted">No se pudo iniciar la cámara. Escribe el código manualmente.</p>';
+          btnStart.disabled = false; // reintento si falla
+        }
+      });
+
+      attachManualInput();
+
+      // Autostart solo UNA VEZ si viene con ?autostart=1 (lo quitamos de la URL inmediatamente)
+      if (hasAutoStart) {
+        params.delete('autostart');
+        const newQuery = params.toString();
+        const newUrl = location.pathname + (newQuery ? '?' + newQuery : '') + location.hash;
+        history.replaceState(null, '', newUrl);
+
+        try {
+          const id = await resolvePreferredCameraId();
+          await startCamera(id);
+          btnStart.disabled = true;
+        } catch (e) {
+          btnStart.disabled = false;
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

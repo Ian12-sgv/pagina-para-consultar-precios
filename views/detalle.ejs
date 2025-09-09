@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title><%= titulo %></title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<link rel="stylesheet" href="css/detalle.css">
+
+</head>
+<body>
+
+  <% if (!item) { %>
+    <div class="notfound">No se encontró el ítem solicitado.</div>
+    <p class="actions">
+      <a class="button" href=".">Ir al inicio</a>
+      <a class="button" href="scan?autostart=1">Escanear otro producto</a>
+
+    </p>
+  <% } else { %>
+    <div class="card">
+      <h2 style="margin:0 0 8px"><%= item.Nombre %></h2>
+      <div class="row">
+        <div><strong>Referencia</strong></div><div><%= item.Referencia %></div>
+        <div><strong>Código barras</strong></div><div><%= item.CodigoBarra || '—' %></div>
+        <div><strong>Costo Dólar</strong></div><div><%= item.CostoDolar %></div>
+      </div>
+      <div class="price">Precio Detal: <span><%= item.PrecioDetal %></span></div>
+
+      <div class="actions">
+        <a class="button" href=".">Ir al inicio</a>
+        <a class="button" href="scan?autostart=1">Escanear otro producto</a>
+
+      </div>
+    </div>
+  <% } %>
+
+  <script>
+    (function(){
+      const btn = document.getElementById('btn-copiar');
+      if (btn) {
+        btn.addEventListener('click', async () => {
+          try {
+            const ref = "<%= (item && item.Referencia) ? item.Referencia : '' %>";
+            if (ref) await navigator.clipboard.writeText(ref);
+          } catch(_){}
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

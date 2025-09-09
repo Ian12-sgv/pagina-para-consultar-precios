@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Resultados</title>
+  <style>
+    body{font-family:system-ui,Arial,sans-serif;margin:24px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ddd;padding:8px}
+    th{background:#f3f3f3;text-align:left}
+    caption{margin-bottom:12px;font-weight:600}
+  </style>
+</head>
+<body>
+  <h1>Resultado</h1>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Referencia</th>
+        <th>Nombre</th>
+        <th>PrecioDetal</th>
+        <th>CostoDolar</th>
+        <th>Código Barras</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (items.length === 0) { %>
+        <tr><td colspan="5">Sin resultados.</td></tr>
+      <% } %>
+      <% for (const r of items) { %>
+        <tr>
+          <td><%= r.Referencia %></td>
+          <td><%= r.Nombre %></td>
+          <td><%= r.PrecioDetal %></td>
+          <td><%= r.CostoDolar %></td>
+          <td><%= r.CodigoBarra %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</body>
+</html>
