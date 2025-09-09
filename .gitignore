@@ -1,0 +1,18 @@
+# Ignora todo
+*
+
+# Permite directorios (necesario para las excepciones)
+!*/
+
+# Solo estas carpetas del proyecto
+!/src/**
+!/views/**
+!/public/**
+
+# Archivos que npm necesita versionar
+!/package.json
+!/package-lock.json
+
+# Otros útiles
+!/README.md
+!/.gitignore

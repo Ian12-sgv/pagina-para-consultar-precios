@@ -5,10 +5,10 @@ const morgan = require('morgan');
 const cors = require('cors');
 require('dotenv').config();
 
-
 // Controladores y DB
 const { buscar } = require('./controllers/buscar.controller'); // maneja /buscar(.php)
 const { query, sql } = require('./db/sqlserver');              // utilidades SQL Server
+const mysqlPool = require('./db/mysql');                       // pool MySQL
 
 const app = express();
 
@@ -35,12 +35,10 @@ app.use(morgan('dev'));
    Rutas
    ======================= */
 
-// Home
 // Home → Landing
 app.get('/', (req, res) => {
   res.render('landing');
 });
-
 
 // Página de escaneo (funciona como /scan y /scan.php)
 app.get(['/scan', '/scan.php'], (req, res) => {
@@ -99,12 +97,57 @@ app.get(['/detalle', '/detalle.php'], async (req, res, next) => {
   }
 });
 
+/* ===== MySQL (inventario_web) ===== */
+
+// Health MySQL
+app.get('/mysql/health', async (req, res) => {
+  try {
+    const [rows] = await mysqlPool.query('SELECT 1 AS ok');
+    res.json({ mysql: 'up', result: rows[0] });
+  } catch (e) {
+    console.error('MySQL error:', e);
+    res.status(500).json({ mysql: 'down', error: e.message });
+  }
+});
+
+// GET /mysql/inventario?limit=50&offset=0&search=abc
+app.get('/mysql/inventario', async (req, res) => {
+  const limit  = Math.min(Number(req.query.limit) || 50, 500);
+  const offset = Number(req.query.offset) || 0;
+  const search = (req.query.search || '').toString().trim();
+
+  let where = '';
+  const params = [];
+  if (search) {
+    where = 'WHERE CodigoBarra = ? OR Referencia LIKE ? OR Nombre LIKE ?';
+    params.push(search, `%${search}%`, `%${search}%`);
+  }
+
+  const sqlText = `
+    SELECT CodigoBarra, Referencia, Nombre, PrecioDetal, CostoInicial
+    FROM inventario_web
+    ${where}
+    ORDER BY id DESC
+    LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
+
+  try {
+    const [rows] = await mysqlPool.execute(sqlText, params);
+    res.json({ count: rows.length, items: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'DB_ERROR', detail: e.message });
+  }
+});
+
+/* ===== Healthchecks generales ===== */
+
 // Salud de la app
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Salud de la DB
+// Salud de SQL Server
 app.get('/db/health', async (req, res) => {
   try {
     const result = await query('SELECT 1 AS ok, DB_NAME() AS db, SYSTEM_USER AS userName');
